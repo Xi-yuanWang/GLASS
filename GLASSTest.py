@@ -1,3 +1,4 @@
+from torch.serialization import load
 from impl import modelx, SubGDataset, train, metrics, utils, config
 import datasets
 import torch
@@ -20,7 +21,7 @@ parser.add_argument('--dataset', type=str, default='ppi_bp')
 parser.add_argument('--use_deg', action='store_true')
 parser.add_argument('--use_one', action='store_true')
 parser.add_argument('--use_nodeid', action='store_true')
-parser.add_argument('--noSSL', action='store_true')
+parser.add_argument('--useMLP', action='store_true')
 # Label settings
 parser.add_argument('--use_maxzeroone', action='store_true')
 
@@ -28,6 +29,7 @@ parser.add_argument('--use_maxzeroone', action='store_true')
 parser.add_argument('--repeat', type=int, default=1)
 # Optuna Settings
 parser.add_argument('--test', action='store_true')
+parser.add_argument('--batchvstime', action='store_true')
 
 parser.add_argument('--device', type=int, default=0)
 parser.add_argument('--use_seed', action='store_true')
@@ -38,6 +40,7 @@ config.set_device(args.device)
 
 
 def set_seed(seed: int):
+    print("seed ", seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -46,7 +49,7 @@ def set_seed(seed: int):
 
 
 def set_repeat_seed(repeat: int):
-    a = [7, 15, 31, 63, 127, 255, 511, 0, 1, 3]
+    a = [0, 1, 3, 7, 15, 31, 63, 127, 255, 511]
     set_seed(a[repeat])
 
 
@@ -103,8 +106,6 @@ def split():
     trn_dataset = SubGDataset.GDataset(*baseG.get_split("train"))
     val_dataset = SubGDataset.GDataset(*baseG.get_split("valid"))
     tst_dataset = SubGDataset.GDataset(*baseG.get_split("test"))
-    #subg_ssl_dataset = SubGDataset.GDataset(*(baseG.get_SubGdataset()))
-
     if args.use_maxzeroone:
         max_z = 1
 
@@ -132,58 +133,68 @@ def split():
 split()
 
 
-def buildModel(hidden_dim, conv_layer, dropout, jk, lr, batch_size, pool,
-               z_ratio, aggr):
-    tmp2 = hidden_dim * (conv_layer) if jk else hidden_dim
+def buildModel(hidden_dim,
+               conv_layer,
+               dropout,
+               jk,
+               lr,
+               batch_size,
+               pool,
+               z_ratio,
+               aggr,
+               use_SSL=False):
     conv_fn = modelx.GLASSConv
-    conv = modelx.NZGConv(hidden_dim,
-                          hidden_dim,
-                          conv_layer,
-                          max_deg=max_deg,
-                          max_z=max_z,
-                          activation=nn.ELU(inplace=True),
-                          jk=jk,
-                          dropout=dropout,
-                          conv=functools.partial(conv_fn,
-                                                 aggr=aggr,
-                                                 z_ratio=z_ratio,
-                                                 dropout=dropout),
-                          gn=True)
+    convs_fn = modelx.NZGConv
+    if conv_layer < 0:
+        conv_layer = -conv_layer
+        conv_fn = modelx.NullConv
+    tmp2 = hidden_dim * (conv_layer) if jk else hidden_dim
+    gn = True
+    if args.dataset in ["density"]:
+        gn = False
+    conv = convs_fn(hidden_dim,
+                    hidden_dim,
+                    conv_layer,
+                    max_deg=max_deg,
+                    max_z=max_z,
+                    activation=nn.ELU(inplace=True),
+                    jk=jk,
+                    dropout=dropout,
+                    conv=functools.partial(conv_fn,
+                                           aggr=aggr,
+                                           z_ratio=z_ratio,
+                                           dropout=dropout),
+                    gn=gn)
 
-    if args.use_nodeid and not args.noSSL:
+    if args.use_nodeid:
+        print("load ", f"./Emb/{args.dataset}_{hidden_dim}.pt")
         emb = torch.load(f"./Emb/{args.dataset}_{hidden_dim}.pt",
                          map_location=torch.device('cpu')).detach()
-        conv.input_emb = nn.Embedding.from_pretrained(emb,
-                                                      freeze=False,
-                                                      scale_grad_by_freq=True)
+        conv.input_emb = nn.Embedding.from_pretrained(emb,  freeze=False)
+    
+    mlp = nn.Linear(tmp2, output_channels)
+    if use_SSL:
+        subg_ssl = modelx.MLP(tmp2,
+                              hidden_dim,
+                              4,
+                              2,
+                              dropout=dropout,
+                              activation=nn.SELU(inplace=True),
+                              bn=False)
+    else:
+        subg_ssl = None
 
-    mlp = modelx.MLP(tmp2,
-                     hidden_dim,
-                     output_channels,
-                     2,
-                     dropout=dropout,
-                     activation=nn.SELU(inplace=True),
-                     bn=False)
-
-    subg_ssl = modelx.MLP(tmp2,
-                          hidden_dim,
-                          4,
-                          2,
-                          dropout=dropout,
-                          activation=nn.ReLU(inplace=True),
-                          bn=False)
     pool_fn_fn = {
         "mean": modelx.MeanPool,
         "max": modelx.MaxPool,
         "sum": modelx.AddPool,
         "size": modelx.SizePool
     }
+    pool_fn2 = None
     if pool in pool_fn_fn:
         pool_fn1 = pool_fn_fn[pool]()
-        pool_fn2 = pool_fn_fn[pool]()
-    elif pool == "attention":
-        pool_fn1 = modelx.AttentionPool(tmp2, dropout)
-        pool_fn2 = modelx.AttentionPool(tmp2, dropout)
+        if use_SSL:
+            pool_fn2 = pool_fn_fn[pool]()
     else:
         raise NotImplementedError
     gnn = modelx.GLASS(conv, torch.nn.ModuleList([mlp, subg_ssl]),
@@ -213,15 +224,18 @@ def test(pool="size",
     num_div = tst_dataset.y.shape[0] / batch_size
     if args.dataset in ["density", "component", "cut_ratio", "coreness"]:
         num_div /= 5
-    t2 = time.time()
-    dist_ssl_dataset = SubGDataset.GDataset(*(baseG.get_Distdataset()))
-    dist_ssl_dataloader = SubGDataset.ZGDataloader(dist_ssl_dataset,
-                                                   int(batch_size * num_node /
-                                                       2),
-                                                   z_fn=utils.MaxZOZ,
-                                                   drop_last=True,
-                                                   shuffle=True)
-    print("dist ssl ", time.time() - t2)
+    if gamma <= 0.01:
+        dist_ssl_dataloader = None
+    else:
+        t2 = time.time()
+        dist_ssl_dataset = SubGDataset.GDataset(*(baseG.get_Distdataset()))
+        dist_ssl_dataloader = SubGDataset.ZGDataloader(dist_ssl_dataset,
+                                                       int(batch_size *
+                                                           num_node / 2),
+                                                       z_fn=utils.MaxZOZ,
+                                                       drop_last=True,
+                                                       shuffle=True)
+        print("dist ssl ", time.time() - t2)
 
     outs = []
     for _ in range(args.repeat):
@@ -229,54 +243,55 @@ def test(pool="size",
         print(f"repeat {_}")
         t1 = time.time()
         gnn = buildModel(hidden_dim, conv_layer, dropout, jk, lr, batch_size,
-                         pool, z_ratio, aggr)
+                         pool, z_ratio, aggr, gamma >= 0.01)
         trn_loader = loader_fn(trn_dataset, batch_size)
         val_loader = tloader_fn(val_dataset, batch_size)
         tst_loader = tloader_fn(tst_dataset, batch_size)
         optimizer = Adam(gnn.parameters(), lr=lr)
-
         scd = lr_scheduler.ReduceLROnPlateau(optimizer,
                                              factor=resi,
                                              min_lr=5e-5)
-
         val_score = 0
         tst_score = 0
+        val_loss = 10000
         print("build model ", time.time() - t1)
         early_stop = 0
         for i in range(300):
             t1 = time.time()
             loss = train.train_modelx(optimizer,
                                       gnn, [trn_loader, dist_ssl_dataloader],
-                                      loss_fns, [1.0],
-                                      ssl_ids=[],
+                                      loss_fns, [1.0, gamma],
+                                      ssl_ids=[1],
                                       verbose=True)
             print("trn time", time.time() - t1)
             scd.step(loss)
             t1 = time.time()
+
             if i >= 100 / num_div:
-                score = train.test(gnn,
-                                   val_loader,
-                                   score_fn,
-                                   verbose=True,
-                                   loss_fn=loss_fn)
+                score, tval_loss = train.test(gnn,
+                                              val_loader,
+                                              score_fn,
+                                              verbose=True,
+                                              loss_fn=loss_fn)
+
                 if score > val_score:
                     early_stop = 0
                     val_score = score
-                    score = train.test(gnn,
-                                       tst_loader,
-                                       score_fn,
-                                       verbose=True,
-                                       loss_fn=loss_fn)
+                    score, _ = train.test(gnn,
+                                          tst_loader,
+                                          score_fn,
+                                          verbose=True,
+                                          loss_fn=loss_fn)
                     tst_score = score
                     print(
                         f"iter {i} loss {loss:.4f} val {val_score:.4f} tst {tst_score:.4f}",
                         flush=True)
                 elif score >= val_score - 1e-5:
-                    score = train.test(gnn,
-                                       tst_loader,
-                                       score_fn,
-                                       verbose=True,
-                                       loss_fn=loss_fn)
+                    score, _ = train.test(gnn,
+                                          tst_loader,
+                                          score_fn,
+                                          verbose=True,
+                                          loss_fn=loss_fn)
                     tst_score = max(score, tst_score)
                     print(
                         f"iter {i} loss {loss:.4f} val {val_score:.4f} tst {score:.4f}",
@@ -285,12 +300,12 @@ def test(pool="size",
                     early_stop += 1
                     if i % 10 == 0:
                         print(
-                            f"iter {i} loss {loss:.4f} val {score:.4f} tst {train.test(gnn, tst_loader, score_fn, verbose=True, loss_fn=loss_fn):.4f}",
+                            f"iter {i} loss {loss:.4f} val {score:.4f} tst {train.test(gnn, tst_loader, score_fn, verbose=True, loss_fn=loss_fn)[0]:.4f}",
                             flush=True)
             print("val and tst time", time.time() - t1)
+            if val_score >= 0.99:
+                early_stop += 1
             if early_stop > 100 / num_div:
-                break
-            if val_score >= 1.00:
                 break
         print(f"end: val {val_score:.4f} tst {tst_score:.4f}", flush=True)
         outs.append(tst_score)
@@ -307,88 +322,88 @@ if args.dataset == "em_user":
         'aggr': 'gcn',
         'batch_size': 6,
         'conv_layer': 1,
-        'dropout': 0.15000000000000002,
+        'dropout': 0.5,
         'gamma': 0.0,
-        'hidden_dim': 56,
-        'lr': 0.0011311645595824163,
+        'hidden_dim': 64,
+        'lr': 0.001,
         'pool': 'size',
         'resi': 0.7,
         'z_ratio': 0.75
     }
 elif args.dataset == "ppi_bp":
     params = {
-        'aggr': 'mean',
-        'batch_size': 80,
+        'hidden_dim': 64,
         'conv_layer': 2,
-        'dropout': 0.35000000000000003,
-        'gamma': 0.0,
-        'hidden_dim': 32,
-        'lr': 0.002535512066861446,
-        'pool': 'size',
-        'resi': 0.9,
-        'z_ratio': 0.6
+        'dropout': 0.5,
+        'aggr': 'mean',
+        'pool': 'sum',
+        'lr': 0.0005,
+        'z_ratio': 0.95,
+        'batch_size': 80,
+        "resi": 0.2
     }
 elif args.dataset == "hpo_metab":
     params = {
-        'aggr': 'gcn',
-        'batch_size': 29,
+        'hidden_dim': 64,
         'conv_layer': 1,
-        'dropout': 0.30000000000000004,
-        'gamma': 0.0,
-        'hidden_dim': 48,
-        'lr': 0.00326,
+        'dropout': 0.5,
+        'aggr': 'gcn',
         'pool': 'sum',
-        'resi': 0.9,
-        'z_ratio': 0.8
+        'lr': 0.001,
+        'z_ratio': 0.55,
+        'batch_size': 59,
+        "resi": 0.2
     }
+
 elif args.dataset == "hpo_neuro":
     params = {
+        'hidden_dim': 64,
+        'conv_layer': 2,
+        'dropout': 0.5,
         'aggr': 'gcn',
-        'batch_size': 49,
-        'conv_layer': 1,
-        'dropout': 0.1,
-        'gamma': 0.0,
-        'hidden_dim': 48,
-        'lr': 0.0020168118786811425,
-        'pool': 'size',
-        'resi': 0.9,
-        'z_ratio': 0.55
+        'pool': 'sum',
+        'lr': 0.002,
+        'z_ratio': 0.85,
+        'batch_size': 99,
+        "resi": 0.2
     }
+
 elif args.dataset == "density":
-    #'hidden_dim': 16, 'conv_layer': 1, 'dropout': 0.2, 'aggr': 'sum', 'pool': 'mean',  'z_ratio': 1.0, 'batch_size': 4, 'gamma': 0.0,
     params = {
-        'aggr': 'sum',
-        'batch_size': 4,
+        'hidden_dim': 13,
         'conv_layer': 1,
-        'dropout': 0.12687905889103224,
-        'lr': 0.002559226759914785,
-        'gamma': 0.0,
-        'hidden_dim': 16,
-        'pool': 'mean',
-        'z_ratio': 1.00
+        'dropout': 0.0,
+        'aggr': 'sum',
+        'pool': 'size',
+        'lr': 0.001,
+        'z_ratio': 0.9500000000000001,
+        'batch_size': 2,
+        "resi": 0.2
     }
+
 elif args.dataset == "cut_ratio":
     params = {
         'hidden_dim': 8,
         'conv_layer': 1,
-        'dropout': 0.30000000000000004,
+        'dropout': 0.3,
         'aggr': 'sum',
         'pool': 'mean',
         'lr': 0.01,
         'z_ratio': 0.75,
-        'batch_size': 4,
+        'batch_size': 3,
         'gamma': 0.0,
-        'resi': 0.8834483446349967
+        'resi': 0.9
     }
+
 elif args.dataset == "coreness":
     params = {
         'aggr': 'sum',
         'batch_size': 7,
         'conv_layer': 2,
-        'dropout': 0.15000000000000002,
+        'dropout': 0.15,
         'gamma': 0.0,
         'hidden_dim': 16,
-        'lr': 0.002445039624607346,
+        'lr': 0.0025,
         'pool': 'size',
         'resi': 0.9,
         'z_ratio': 0.8
@@ -396,15 +411,24 @@ elif args.dataset == "coreness":
 
 elif args.dataset == "component":
     params = {
-        'hidden_dim': 16,
+        'aggr': 'sum',
+        'batch_size': 8,
         'conv_layer': 1,
         'dropout': 0.0,
-        'aggr': 'gcn',
+        'hidden_dim': 17,
+        'lr': 0.001,
         'pool': 'sum',
-        'z_ratio': 0.75,
-        'batch_size': 8,
-        'gamma': 0.0
+        'z_ratio': 0.9
     }
+
+if args.useMLP:
+    params["conv_layer"] = -params["conv_layer"]
+
+if args.batchvstime:
+    for bs in [1, 2, 4, 8, 16, 32]:
+        params["batch_size"] = bs
+    print("best params", params, flush=True)
+    print(test(**(params)))
 
 print("best params", params, flush=True)
 print(test(**(params)))

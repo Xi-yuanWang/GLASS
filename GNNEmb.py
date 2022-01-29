@@ -1,4 +1,4 @@
-from std_impl import modelx, SubGDataset, train, metrics, utils, config
+from impl import modelx, SubGDataset, train, metrics, utils, config
 import datasets
 import torch
 from torch.optim import Adam, SGD, lr_scheduler
@@ -19,14 +19,14 @@ parser.add_argument('--dataset', type=str, default='ppi_bp')
 # X setting
 parser.add_argument('--use_deg', action='store_true')
 parser.add_argument('--use_one', action='store_true')
-
+parser.add_argument('--use_nodeid', action='store_true')
 # Train settings
 parser.add_argument('--repeat', type=int, default=1)
 # Optuna Settings
 parser.add_argument('--test', action='store_true')
 parser.add_argument('--abl', action='store_true')
 
-parser.add_argument('--optruns', type=int, default=50)
+parser.add_argument('--optruns', type=int, default=100)
 parser.add_argument('--path', type=str, default="Emb/")
 parser.add_argument('--name', type=str, default="opt")
 parser.add_argument('--device', type=int, default=0)
@@ -49,6 +49,8 @@ def split():
         baseG.setPosDegreeFeature()
     elif args.use_one:
         baseG.setPosOneFeature()
+    elif args.use_nodeid:
+        baseG.setPosNodeIdFeature()
     else:
         raise NotImplementedError
     max_deg = torch.max(baseG.x)
@@ -62,13 +64,10 @@ def split():
     val_dataset = SubGDataset.GDataset(x, ei, ea, pos[val_idx], y[val_idx])
 
     def loader_fn(ds, bs):
-        return SubGDataset.GDataloader(ds, bs, device=config.device)
+        return SubGDataset.GDataloader(ds, bs)
 
     def tloader_fn(ds, bs):
-        return SubGDataset.GDataloader(ds,
-                                       bs,
-                                       device=config.device,
-                                       shuffle=False)
+        return SubGDataset.GDataloader(ds, bs, shuffle=False)
 
 
 split()
@@ -94,16 +93,14 @@ def buildModel(hidden_dim, conv_layer, dropout, jk, lr, batch_size):
                           1,
                           2,
                           dropout=dropout,
-                          activation=nn.ReLU(inplace=True),
-                          bn=False)
+                          activation=nn.ReLU(inplace=True))
 
     node_ssl = modelx.MLP(tmp2,
                           hidden_dim,
                           conv_layer,
                           2,
                           dropout=dropout,
-                          activation=nn.ReLU(inplace=True),
-                          bn=False)
+                          activation=nn.ReLU(inplace=True))
 
     gnn = modelx.EdgeGNN(
         conv, torch.nn.ModuleList([edge_ssl, node_ssl]),
@@ -115,7 +112,8 @@ def buildModel(hidden_dim, conv_layer, dropout, jk, lr, batch_size):
 def work(hidden_dim, conv_layer, dropout, jk, lr, batch_size, alpha):
     trn_loader = loader_fn(trn_dataset, batch_size)
     val_loader = tloader_fn(val_dataset, val_dataset.y.shape[0])
-    node_ssl_dataset = SubGDataset.GDataset(*(baseG.get_Lindataset(conv_layer)))
+    node_ssl_dataset = SubGDataset.GDataset(
+        *(baseG.get_Lindataset(conv_layer)))
     outs = []
     loss_fns = [
         lambda x, y: BCEWithLogitsLoss()(x.flatten(), y.flatten()),
@@ -146,7 +144,7 @@ def work(hidden_dim, conv_layer, dropout, jk, lr, batch_size, alpha):
                 loss = loss_fns[0](edge_pred, batch[-1])
                 if alpha > 0.01:
                     node_pred = gnn.preds[1](emb)
-                    loss+= alpha * loss_fns[1](node_pred, node_ssl_dataset.y)
+                    loss += alpha * loss_fns[1](node_pred, node_ssl_dataset.y)
                 loss.backward()
                 scd.step(loss)
                 losss.append(loss.item())
@@ -182,15 +180,15 @@ def obj(trial):
     global trn_dataset, val_dataset, tst_dataset, args
     global input_channels, output_channels, loader_fn, tloader_fn
     global loss_fn, best_score
-    hidden_dim = trial.suggest_int('hidden_dim', 8, 32, step=8)
+    hidden_dim = trial.suggest_int('hidden_dim', 32, 64, step=8)
     conv_layer = trial.suggest_int('conv_layer', 2, 5, step=1)
-    dropout = trial.suggest_float('dropout', 0.0, 0.3, step=0.1)
+    dropout = trial.suggest_float('dropout', 0.0, 0.5, step=0.1)
     args.aggr = trial.suggest_categorical("aggr", ["sum", "mean", "gcn"])
     jk = 0
     lr = 1e-3
-    batch_size = trial.suggest_int("batch_size", 32678, 32678, step=512)
+    batch_size = trial.suggest_int("batch_size", 131072, 131072, step=512)
     jk = (jk == 1)
-    alpha = trial.suggest_float('alpha', 0.0, 2.0, step=0.1)
+    alpha = trial.suggest_float('alpha', 0.0, 0.0, step=0.1)
     score, emb = work(hidden_dim, conv_layer, dropout, jk, lr, batch_size,
                       alpha)
     if hidden_dim not in best_score:

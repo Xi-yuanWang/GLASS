@@ -83,6 +83,4 @@ def test(model, dl, metrics, verbose=False, loss_fn=None):
         ys.append(batch[-1])
     pred = torch.cat(preds, dim=0)
     y = torch.cat(ys, dim=0)
-    if verbose:
-        print(f"val and tst loss {loss_fn(pred, y):.4f}")
-    return metrics(pred.cpu().numpy(), y.cpu().numpy())
+    return metrics(pred.cpu().numpy(), y.cpu().numpy()), loss_fn(pred, y)
