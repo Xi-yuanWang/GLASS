@@ -1,4 +1,24 @@
-## GLASS
+# GLASS: GNN with Labeling Tricks for Subgraph Representation Learning
+
+This repository is the official implementation of the model in the following paper:
+
+Xiyuan Wang, Muhan Zhang. GLASS: GNN with Labeling Tricks for Subgraph Representation Learning. ICLR 2022.
+
+[OpenReview](https://openreview.net/forum?id=XLxhEjKNbXj)
+
+If you make use of the code/experiment in your work, please cite our paper (Bibtex below).
+
+```{bibtex}
+@inproceedings{
+glass,
+title={GLASS: GNN with Labeling Tricks for Subgraph Representation Learning},
+author={Xiyuan Wang and Muhan Zhang},
+booktitle={International Conference on Learning Representations},
+year={2022},
+url={https://openreview.net/forum?id=XLxhEjKNbXj}
+}
+```
+
 #### Install the Environment
 You can use conda to create an environment for running the code. 
 ```{bash}
@@ -31,5 +51,3 @@ mkdir out
 python GLASStasks.py
 ```
 You can change the device and dataset in GLASStasks.py.
-
-Though the seed has been fixed, the sparse matrix multiplication is not deterministic in PyTorch, it normal to observe some variance in performance.
