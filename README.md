@@ -1,12 +1,8 @@
 # GLASS: GNN with Labeling Tricks for Subgraph Representation Learning
 
-This repository is the official implementation of the model in the following paper:
+This repository is the official implementation of the model in the [following paper](https://openreview.net/forum?id=XLxhEjKNbXj):
 
 Xiyuan Wang, Muhan Zhang. GLASS: GNN with Labeling Tricks for Subgraph Representation Learning. ICLR 2022.
-
-[OpenReview](https://openreview.net/forum?id=XLxhEjKNbXj)
-
-If you make use of the code/experiment in your work, please cite our paper (Bibtex below).
 
 ```{bibtex}
 @inproceedings{
