@@ -1,37 +1,37 @@
 import subprocess
-import time
+
 
 # pretrain GNN to produce embedding
-def emb(dg):
-    dataset, gpu_id = dg
+def emb(dataset, gpu_id):
     cmd = f"nohup python GNNEmb.py --use_{feature} --device {gpu_id} --dataset {dataset} --name {dataset} >  Emb/{dataset}{gpu_id} 2>&1 &"
     print(cmd, flush=True)
     subprocess.call(cmd, shell=True)
 
+
 # test GLASS
-def test(dg):
-    dataset, gpu_id = dg
-    cmd = f"nohup python GLASSTest.py --use_{feature} --use_seed --use_maxzeroone --repeat 10 --device {gpu_id} --dataset {dataset} >  out/{dataset}{gpu_id}.test3 2>&1 &"
+def test(dataset, gpu_id):
+    cmd = f"nohup python GLASSTest.py --use_{feature} --use_seed --use_maxzeroone --repeat 10 --device {gpu_id} --dataset {dataset} >  out/{dataset}.test 2>&1 &"
     print(cmd, flush=True)
     subprocess.call(cmd, shell=True)
 
-# ablation test
-def gnn(dg):
-    dataset, gpu_id = dg
-    cmd = f"nohup python GLASSTest.py  --use_{feature} --use_seed --repeat 10 --device {gpu_id} --dataset {dataset} >  out/{dataset}{gpu_id}.gnn 2>&1 &"
+
+# ablation analysis using plain GNN
+def gnn(dataset, gpu_id):
+    cmd = f"nohup python GLASSTest.py  --use_{feature} --use_seed --repeat 10 --device {gpu_id} --dataset {dataset} >  out/{dataset}.gnn 2>&1 &"
     print(cmd, flush=True)
     subprocess.call(cmd, shell=True)
-
 
 
 # dg is pair of dataset name and GPU id.
+# reproduce results in GLASS paper.
+
 feature = "nodeid"
-real = [("ppi_bp", 0), ("hpo_metab", 0), ("hpo_neuro", 0), ("em_user", 0)]
+real = [("ppi_bp", 0), ("hpo_metab", 1), ("hpo_neuro", 2), ("em_user", 3)]
 for dg in real:
-    gnn(dg)
+    test(*dg)
+'''
 feature = "one"
-syn = [("density", 0), ("component", 0),("coreness", 0),("cut_ratio", 0)] 
+syn = [("density", 0), ("component", 1), ("coreness", 2), ("cut_ratio", 3)]
 for dg in syn:
-    gnn(dg)
-
-
+    test(*dg)
+'''

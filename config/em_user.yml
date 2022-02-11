@@ -1,0 +1,9 @@
+aggr: gcn
+batch_size: 6
+conv_layer: 1
+dropout: 0.5
+hidden_dim: 64
+lr: 0.001
+pool: size
+resi: 0.7
+z_ratio: 0.75

@@ -1,5 +1,4 @@
 import torch
-import os
 
 device_index = 0
 device = torch.device(

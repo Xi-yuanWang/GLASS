@@ -19,25 +19,8 @@ class BaseGraph(Data):
         self.mask = mask
         self.to_undirected()
 
-    def addDegreeFeature(self):
-        adj = torch.sparse_coo_tensor(self.edge_index, self.edge_attr,
-                                      (self.x.shape[0], self.x.shape[0]))
-        degree = torch.sparse.sum(adj, dim=1).to_dense().to(torch.int64)
-        self.x = torch.cat((self.x, one_hot(degree).to(torch.float).reshape(
-            self.x.shape[0], 1, -1)),
-                           dim=-1)
-
-    def addOneFeature(self):
-        self.x = torch.cat(
-            (self.x, torch.ones(self.x.shape[0], self.x.shape[1], 1)), dim=-1)
-
-    def addIDFeature(self):
-        self.x = torch.cat((self.x, torch.arange(self.x.shape[0]).reshape(
-            -1, 1)[:, torch.ones(self.x.shape[1], 1)].reshape(
-                self.x.shape[0], self.x.shape[1], 1)),
-                           dim=-1)
-
-    def setPosDegreeFeature(self, mod=1):
+    def setDegreeFeature(self, mod=1):
+        # use node degree as node features.
         adj = torch.sparse_coo_tensor(self.edge_index, self.edge_attr,
                                       (self.x.shape[0], self.x.shape[0]))
         degree = torch.sparse.sum(adj, dim=1).to_dense().to(torch.int64)
@@ -45,15 +28,16 @@ class BaseGraph(Data):
         degree = torch.unique(degree, return_inverse=True)[1]
         self.x = degree.reshape(self.x.shape[0], 1, -1)
 
-    def setPosOneFeature(self):
+    def setOneFeature(self):
+        # use homogeneous node features.
         self.x = torch.ones((self.x.shape[0], 1, 1), dtype=torch.int64)
 
-    def setPosNodeIdFeature(self):
+    def setNodeIdFeature(self):
+        # use nodeid as node features.
         self.x = torch.arange(self.x.shape[0], dtype=torch.int64).reshape(
             self.x.shape[0], 1, -1)
 
     def get_split(self, split: str):
-        # train,valid,test
         tar_mask = {"train": 0, "valid": 1, "test": 2}[split]
         return self.x, self.edge_index, self.edge_attr, self.pos[
             self.mask == tar_mask], self.y[self.mask == tar_mask]
@@ -64,6 +48,7 @@ class BaseGraph(Data):
                 self.edge_index, self.edge_attr)
 
     def get_LPdataset(self, use_loop=False):
+        # generate link prediction dataset for pretraining GNNs
         neg_edge = negative_sampling(self.edge_index)
         x = self.x
         ei = self.edge_index
@@ -82,80 +67,6 @@ class BaseGraph(Data):
             y = torch.cat((y, y_loop), dim=0)
         return x, ei, ea, pos, y
 
-    def get_Lindataset(self, poly: int):
-        x = self.x
-        ei = self.edge_index
-        ea = self.edge_attr
-        pos = torch.arange(self.x.shape[0], device=x.device).reshape(-1, 1)
-
-        from torch_geometric.nn.models import LabelPropagation
-        with torch.no_grad():
-            mod = LabelPropagation(1, 0.0)
-            ys = [x.to(torch.float).reshape(x.shape[0], -1)]
-            for i in range(poly - 1):
-                ys.append(mod(ys[-1], ei))
-            y = torch.cat(ys, dim=-1)
-            y = y - torch.mean(y, dim=0, keepdim=True)
-            y /= (torch.std(y, dim=0, keepdim=True) + 1e-5)
-        return x, ei, ea, pos, y
-
-    def get_Distdataset(self):
-        setpos = self.pos.unique()
-        dev = setpos.device
-        setpos = setpos[setpos >= 0]
-        from scipy.sparse.csgraph import dijkstra
-        from torch_geometric.utils import to_scipy_sparse_matrix
-        spG = to_scipy_sparse_matrix(self.edge_index)
-        idx = torch.randint(setpos.shape[0], (500, ))
-        selectedSoc = setpos[idx].cpu().numpy()
-        out = dijkstra(spG,
-                       directed=False,
-                       unweighted=True,
-                       indices=selectedSoc,
-                       limit=5)
-        pos1 = torch.arange(out.shape[1], device=dev).reshape(
-            1, -1)[torch.zeros(out.shape[0], dtype=torch.int64, device=dev)]
-        pos0 = torch.from_numpy(selectedSoc).to(dev).reshape(
-            -1, 1)[:,
-                   torch.zeros(out.shape[1], dtype=torch.int64, device=dev)]
-        pos = torch.stack((pos1.flatten(), pos0.flatten())).t()
-        y = torch.from_numpy(out.flatten()).to(torch.int64).to(dev)
-
-        pos = pos[y > 0]
-        y = y[y > 0]
-        y -= 1
-        sety = torch.unique(y)
-        idxs = [torch.arange(y.shape[0])[y == i] for i in sety]
-        minlen = min([len(i) for i in idxs])
-        idxs = [i[torch.randint(i.shape[0], (minlen, ))] for i in idxs]
-        idx = torch.cat(idxs)
-
-        return self.x, self.edge_index, self.edge_attr, pos[idx], y[idx]
-
-    def get_SubGdataset(self):
-        pos = self.pos.cpu().numpy()
-        y = []
-        G = to_networkx(self, to_undirected=True)
-        for i in pos:
-            out_edge = nx.cut_size(G, i[i >= 0])
-            subg = nx.subgraph(G, i[i >= 0])
-            in_edge = subg.number_of_edges()
-            num_node = len(subg)
-            cut_ratio = in_edge / (in_edge + out_edge + 1)
-            density = in_edge / (num_node * (num_node - 1) / 2 + 1)
-            component = nx.components.number_connected_components(subg)
-            self_loop = nx.number_of_selfloops(subg)
-            self_loop_ratio = self_loop / num_node
-            y.append([cut_ratio, density, component, self_loop_ratio])
-        y = torch.FloatTensor(y).to(self.x.device)
-        y = y - torch.mean(y, dim=0, keepdim=True)
-        y /= (torch.std(y, dim=0, keepdim=True) + 1e-5)
-        pos = self.pos
-        x = self.x
-        ei = self.edge_index
-        ea = self.edge_attr
-        return x, ei, ea, pos, y
-
     def to(self, device):
         self.x = self.x.to(device)
         self.edge_index = self.edge_index.to(device)
@@ -167,10 +78,12 @@ class BaseGraph(Data):
 
 
 def load_dataset(name: str):
+    # To use your own dataset, add a branch returning a BaseGraph Object here.
     if name in [
             "coreness", "cut_ratio", "density", "component"
-    ]:  #"./dataset_/{name}/tmp.npy""./biggerSynSubG/SynG_{name}_0.npy"
+    ]:
         obj = np.load(f"./dataset_/{name}/tmp.npy", allow_pickle=True).item()
+        # copied from https://github.com/mims-harvard/SubGNN/blob/main/SubGNN/subgraph_utils.py
         edge = np.array([[i[0] for i in obj['G'].edges],
                          [i[1] for i in obj['G'].edges]])
         degree = obj['G'].degree
@@ -192,9 +105,7 @@ def load_dataset(name: str):
                          torch.ones(edge.shape[1]), subG_pad, subGLabel, mask)
     elif name in ["ppi_bp", "hpo_metab", "hpo_neuro", "em_user"]:
         multilabel = False
-
-        # copy from SubGNN/subgraph_utils.py
-
+        # copied from https://github.com/mims-harvard/SubGNN/blob/main/SubGNN/subgraph_utils.py
         def read_subgraphs(sub_f, split=True):
             label_idx = 0
             labels = {}
@@ -287,12 +198,6 @@ def load_dataset(name: str):
         rawedge = nx.read_edgelist(f"./dataset/{name}/edge_list.txt").edges
         edge_index = torch.tensor([[int(i[0]), int(i[1])]
                                    for i in rawedge]).t()
-        '''
-        x = torch.load(f"./dataset/{name}/gin_embeddings.pth",
-                       map_location=torch.device('cpu')).detach()
-        x = x.reshape(x.shape[0], 1, x.shape[1])
-        '''
-
         num_node = max([torch.max(pos), torch.max(edge_index)]) + 1
         x = torch.empty((num_node, 1, 0))
 

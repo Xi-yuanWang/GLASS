@@ -42,8 +42,13 @@ CODE
     └── cut_ratio
 ```
 #### Reproduce GLASS
+Change the device and dataset in GLASStasks.py. Then 
 ```
 mkdir out
 python GLASStasks.py
 ```
-You can change the device and dataset in GLASStasks.py.
+Results will be shown in `out` dir.
+
+#### Use Your Own Dataset
+
+Please add a branch in the `load_dataset` function in datasets.py to load your dataset and create a configuration file in ./config to describe the hyperparameters for the GLASS model.

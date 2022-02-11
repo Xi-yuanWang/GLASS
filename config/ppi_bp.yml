@@ -1,0 +1,9 @@
+aggr: mean
+batch_size: 80
+conv_layer: 2
+dropout: 0.5
+hidden_dim: 64
+lr: 0.0005
+pool: sum
+resi: 0.2
+z_ratio: 0.95
