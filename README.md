@@ -16,7 +16,7 @@ url={https://openreview.net/forum?id=XLxhEjKNbXj}
 ```
 
 #### Requirements
-Tested combination: Python 3.9.6 + PyTorch 1.9.0 + PyTorch_Geometric 1.7.2
+Tested combination: Python 3.9.6 + [PyTorch 1.9.0](https://pytorch.org/get-started/previous-versions/) + [PyTorch_Geometric 1.7.2](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html)
 
 Other required python libraries include: numpy, scikit-learn, pyyaml etc.
 
