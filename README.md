@@ -15,12 +15,10 @@ url={https://openreview.net/forum?id=XLxhEjKNbXj}
 }
 ```
 
-#### Install the Environment
-You can use conda to create an environment for running the code. 
-```{bash}
-conda env create --file SubGNN.yml 
-```
-Before create the environment you may modify the prefix to the location you prefer.
+#### Requirements
+Tested combination: Python 3.9.6 + PyTorch 1.9.0 + PyTorch_Geometric 1.7.2
+
+Other required python libraries include: numpy, scikit-learn, pyyaml etc.
 
 #### Prepare Data
 
