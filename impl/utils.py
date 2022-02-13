@@ -39,6 +39,7 @@ def MaxZOZ(x, pos):
     '''
     z = torch.zeros(x.shape[0], device=x.device, dtype=torch.int64)
     pos = pos.flatten()
+    # pos[pos >= 0] removes -1 from pos
     tpos = pos[pos >= 0].to(z.device)
     z[tpos] = 1
     return z
