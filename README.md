@@ -28,7 +28,6 @@ You can download the realworld datasets [here](https://www.dropbox.com/sh/zv7gw2
 The location of each dataset should be
 ```
 CODE
-├── Emb
 ├── dataset
 │   ├── em_user
 │   ├── hpo_metab
@@ -53,7 +52,7 @@ where $dataset should be replace with the dataset you want to test, like density
 
 To reproduce our results on real-world datasets:
 
-We have provided our SSL embeddings in ./Emb/. You can also generate them by
+We have provided our SSL embeddings in ./Emb/. You can also reproduce them by
 ```
 python GNNEmb.py --use_nodeid --device $gpu_id --dataset $dataset --name $dataset
 ```
