@@ -1,12 +1,15 @@
 import torch
 
 
-def train(optimizer, modelx, dl, loss_fn):
-    modelx.train()
+def train(optimizer, model, dataloader, loss_fn):
+    '''
+    Train models in an epoch.
+    '''
+    model.train()
     total_loss = []
-    for batch in dl:
+    for batch in dataloader:
         optimizer.zero_grad()
-        pred = modelx(*batch[:-1], id=0)
+        pred = model(*batch[:-1], id=0)
         loss = loss_fn(pred, batch[-1])
         loss.backward()
         total_loss.append(loss.detach().item())
@@ -15,11 +18,14 @@ def train(optimizer, modelx, dl, loss_fn):
 
 
 @torch.no_grad()
-def test(model, dl, metrics, loss_fn=None):
+def test(model, dataloader, metrics, loss_fn):
+    '''
+    Test models either on validation dataset or test dataset.
+    '''
     model.eval()
     preds = []
     ys = []
-    for batch in dl:
+    for batch in dataloader:
         pred = model(*batch[:-1])
         preds.append(pred)
         ys.append(batch[-1])

@@ -5,18 +5,20 @@ from torch.utils.data import DataLoader
 
 class GDataset(Data):
     '''
-    x : node feature
-    pos : the node set of target subgraphs
-    subG_label : the target
+    A class to contain splitted data.
+    Args:
+        x : node feature
+        pos : the node set of target subgraphs. shape: (m, c). m is the number of subgraphs. c is the maximum number of nodes in a subgraph. 
+            For example, [[0, 1, 2], [6, 7, -1]] means two subgraphs containing nodes 0, 1, 2 and 6, 7 respectively.
+        y : the target.
     '''
-    def __init__(self, x, edge_index, edge_attr, pos, subG_label):
-        super(GDataset, self).__init__(x=x,
-                                       edge_index=edge_index,
-                                       edge_attr=edge_attr,
-                                       y=subG_label,
-                                       pos=pos)
+    def __init__(self, x, edge_index, edge_attr, pos, y):
+        super().__init__(x=x,
+                         edge_index=edge_index,
+                         edge_attr=edge_attr,
+                         y=y,
+                         pos=pos)
         self.num_nodes = x.shape[0]
-        # self.to_undirected()
 
     def __len__(self):
         return self.pos.shape[0]
@@ -66,14 +68,15 @@ class GDataloader(DataLoader):
 
     def __next__(self):
         perm = next(self.iter)
-        return self.get_x(), self.get_ei(), self.get_ea(
-        ), self.get_pos()[perm], self.get_y()[perm]
+        return self.get_x(), self.get_ei(), self.get_ea(), self.get_pos(
+        )[perm], self.get_y()[perm]
 
 
 class ZGDataloader(GDataloader):
     '''
-    Dataloader for GDataset.
-    z_fn assigns node label.
+    Dataloader for GDataset. 
+    Args:
+        z_fn: assigning node label for each batch.
     '''
     def __init__(self,
                  Gdataset,

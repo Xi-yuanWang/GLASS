@@ -12,8 +12,9 @@ import numpy as np
 parser = argparse.ArgumentParser(description='')
 # Dataset settings
 parser.add_argument('--dataset', type=str, default='ppi_bp')
-
-# Node feature setting
+# Node feature settings. 
+# deg means use node degree. one means use homogeneous embeddings.
+# nodeid means use pretrained node embeddings in ./Emb
 parser.add_argument('--use_deg', action='store_true')
 parser.add_argument('--use_one', action='store_true')
 parser.add_argument('--use_nodeid', action='store_true')
@@ -39,6 +40,9 @@ max_deg, max_z, output_channels = 0, 1, 1
 
 
 def split():
+    '''
+    load and split dataset.
+    '''
     global trn_dataset, val_dataset
     global max_deg, max_z, output_channels, loader_fn, tloader_fn
     if args.use_deg:
@@ -70,6 +74,12 @@ split()
 
 
 def buildModel(hidden_dim, conv_layer, dropout, jk):
+    '''
+    Build a EdgeGNN model.
+    Args:
+        jk: whether to use Jumping Knowledge Network.
+        conv_layer: number of GLASSConv.
+    '''
     tmp2 = hidden_dim * (conv_layer) if jk else hidden_dim
     conv = models.EmbGConv(hidden_dim,
                            hidden_dim,
@@ -96,6 +106,9 @@ def buildModel(hidden_dim, conv_layer, dropout, jk):
 
 
 def work(hidden_dim, conv_layer, dropout, jk, lr, batch_size):
+    '''
+    try a set of hyperparameters for pretrained GNN.
+    '''
     trn_loader = loader_fn(trn_dataset, batch_size)
     val_loader = tloader_fn(val_dataset, val_dataset.y.shape[0])
     outs = []
@@ -154,6 +167,9 @@ best_score = 0
 
 
 def obj(trial):
+    '''
+    a trial of hyperparameter optimization.
+    '''
     global trn_dataset, val_dataset, tst_dataset, args
     global input_channels, output_channels, loader_fn, tloader_fn
     global loss_fn, best_score

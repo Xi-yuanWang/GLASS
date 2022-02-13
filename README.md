@@ -23,7 +23,7 @@ Other required python libraries include: numpy, scikit-learn, pyyaml etc.
 
 #### Prepare Data
 
-You can download the realworld datasets [here](https://www.dropbox.com/sh/zv7gw2bqzqev9yn/AACR9iR4Ok7f9x1fIAiVCdj3a?dl=0). Please download, unzip, and put them in ./dataset/. We follow the code provide by [SubGNN](https://github.com/mims-harvard/SubGNN) to produce synthetic datasets. And we also provide the synthetic dataset we use in ./dataset_/. We also pretrains SSL embeddings. They are in ./Emb/.
+You can download the realworld datasets [here](https://www.dropbox.com/sh/zv7gw2bqzqev9yn/AACR9iR4Ok7f9x1fIAiVCdj3a?dl=0) or from our [mirror](https://disk.pku.edu.cn/#/link/B85C0589ADE44E0CFF8AAD6A4D6BF6B0%20). Please download, unzip, and put them in ./dataset/. We follow the code provide by [SubGNN](https://github.com/mims-harvard/SubGNN) to produce synthetic datasets. And we also provide the synthetic dataset we use in ./dataset_/.
 
 The location of each dataset should be
 ```
@@ -41,12 +41,27 @@ CODE
     └── cut_ratio
 ```
 #### Reproduce GLASS
-Change the device and dataset in GLASStasks.py. Then 
+
+
+
+To reproduce our results on synthetic datasets:
 ```
-mkdir out
-python GLASStasks.py
+python GLASSTest.py --use_one --use_seed --use_maxzeroone --repeat 10 --device $gpu_id --dataset $dataset
 ```
-Results will be shown in `out` dir.
+where $dataset should be replace with the dataset you want to test, like density, component, coreness, and cut_ratio. $gpu_id should replace with the gpu you want to use. Set $gpu_id to -1 if you use cpu.
+
+
+To reproduce our results on real-world datasets:
+
+We have provided our SSL embeddings in ./Emb/. You can also generate them by
+```
+python GNNEmb.py --use_nodeid --device $gpu_id --dataset $dataset --name $dataset
+```
+Then 
+```
+python GLASSTest.py --use_nodeid --use_seed --use_maxzeroone --repeat 10 --device $gpu_id --dataset $dataset
+```
+where $dataset can be selected from em_user, ppi_bp, hpo_metab, and hpo_neuro.
 
 #### Use Your Own Dataset
 

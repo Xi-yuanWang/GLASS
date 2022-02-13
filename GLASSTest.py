@@ -14,8 +14,9 @@ import yaml
 parser = argparse.ArgumentParser(description='')
 # Dataset settings
 parser.add_argument('--dataset', type=str, default='ppi_bp')
-
-# Node feature settings
+# Node feature settings. 
+# deg means use node degree. one means use homogeneous embeddings.
+# nodeid means use pretrained node embeddings in ./Emb
 parser.add_argument('--use_deg', action='store_true')
 parser.add_argument('--use_one', action='store_true')
 parser.add_argument('--use_nodeid', action='store_true')
@@ -74,6 +75,9 @@ tloader_fn = SubGDataset.GDataloader
 
 
 def split():
+    '''
+    load and split dataset.
+    '''
     # initialize and split dataset
     global trn_dataset, val_dataset, tst_dataset
     global max_deg, output_channels, loader_fn, tloader_fn
@@ -118,10 +122,14 @@ def split():
 
 
 def buildModel(hidden_dim, conv_layer, dropout, jk, pool, z_ratio, aggr):
-    gn = True
     '''
-    if args.dataset in ["density"]:
-        gn = False
+    Build a GLASS model.
+    Args:
+        jk: whether to use Jumping Knowledge Network.
+        conv_layer: number of GLASSConv.
+        pool: pooling function transfer node embeddings to subgraph embeddings.
+        z_ratio: see GLASSConv in impl/model.py. Z_ratio in [0.5, 1].
+        aggr: aggregation method. mean, sum, or gcn. 
     '''
     conv = models.EmbZGConv(hidden_dim,
                             hidden_dim,
@@ -134,8 +142,9 @@ def buildModel(hidden_dim, conv_layer, dropout, jk, pool, z_ratio, aggr):
                                                    aggr=aggr,
                                                    z_ratio=z_ratio,
                                                    dropout=dropout),
-                            gn=gn)
+                            gn=True)
 
+    # use pretrained node embeddings.
     if args.use_nodeid:
         print("load ", f"./Emb/{args.dataset}_{hidden_dim}.pt")
         emb = torch.load(f"./Emb/{args.dataset}_{hidden_dim}.pt",
@@ -171,9 +180,16 @@ def test(pool="size",
          z_ratio=0.8,
          batch_size=None,
          resi=0.7):
+    '''
+    Test a set of hyperparameters in a task.
+    Args:
+        jk: whether to use Jumping Knowledge Network.
+        z_ratio: see GLASSConv in impl/model.py. A hyperparameter of GLASS.
+        resi: the lr reduce factor of ReduceLROnPlateau.
+    '''
     outs = []
     t1 = time.time()
-    # we set batch_size = tst_dataset.y.shape[0] // num_div. 
+    # we set batch_size = tst_dataset.y.shape[0] // num_div.
     num_div = tst_dataset.y.shape[0] / batch_size
     # we use num_div to calculate the number of iteration per epoch and count the number of iteration.
     if args.dataset in ["density", "component", "cut_ratio", "coreness"]:
@@ -250,7 +266,7 @@ def test(pool="size",
 print(args)
 # read configuration
 with open(f"config/{args.dataset}.yml") as f:
-    params = yaml.load(f)
+    params = yaml.safe_load(f)
 
 print("params", params, flush=True)
 split()

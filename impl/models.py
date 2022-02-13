@@ -8,7 +8,11 @@ from .utils import pad2batch
 
 
 class Seq(nn.Module):
-    # An extension of nn.Sequential
+    ''' 
+    An extension of nn.Sequential. 
+    Args: 
+        modlist an iterable of modules to add.
+    '''
     def __init__(self, modlist):
         super().__init__()
         self.modlist = nn.ModuleList(modlist)
@@ -21,7 +25,13 @@ class Seq(nn.Module):
 
 
 class MLP(nn.Module):
-    # multi-layer perceptron block
+    '''
+    Multi-Layer Perception.
+    Args:
+        tail_activation: whether to use activation function at the last layer.
+        activation: activation function.
+        gn: whether to use GraphNorm layer.
+    '''
     def __init__(self,
                  input_channels: int,
                  hidden_channels: int,
@@ -31,11 +41,6 @@ class MLP(nn.Module):
                  tail_activation=False,
                  activation=nn.ReLU(inplace=True),
                  gn=False):
-        '''
-        tail_activation: whether to use activation function at the last layer.
-        activation: activation function
-        gn: whether to use GraphNorm layer.
-        '''
         super().__init__()
         modlist = []
         self.seq = None
@@ -75,9 +80,45 @@ class MLP(nn.Module):
         return self.seq(x)
 
 
+def buildAdj(edge_index, edge_weight, n_node: int, aggr: str):
+    '''
+        Calculating the normalized adjacency matrix.
+        Args:
+            n_node: number of nodes in graph.
+            aggr: the aggregation method, can be "mean", "sum" or "gcn".
+        '''
+    adj = torch.sparse_coo_tensor(edge_index,
+                                  edge_weight,
+                                  size=(n_node, n_node))
+    deg = torch.sparse.sum(adj, dim=(1, )).to_dense().flatten()
+    deg[deg < 0.5] += 1.0
+    if aggr == "mean":
+        deg = 1.0 / deg
+        return torch.sparse_coo_tensor(edge_index,
+                                       deg[edge_index[0]] * edge_weight,
+                                       size=(n_node, n_node))
+    elif aggr == "sum":
+        return torch.sparse_coo_tensor(edge_index,
+                                       edge_weight,
+                                       size=(n_node, n_node))
+    elif aggr == "gcn":
+        deg = torch.pow(deg, -0.5)
+        return torch.sparse_coo_tensor(edge_index,
+                                       deg[edge_index[0]] * edge_weight *
+                                       deg[edge_index[1]],
+                                       size=(n_node, n_node))
+    else:
+        raise NotImplementedError
+
+
 class GLASSConv(torch.nn.Module):
-    # A kind of message passing layer we use for GLASS.
-    # We use different parameters to transform the features of node with different labels individually, and mix them.
+    '''
+    A kind of message passing layer we use for GLASS.
+    We use different parameters to transform the features of node with different labels individually, and mix them.
+    Args:
+        aggr: the aggregation method.
+        z_ratio: the ratio to mix the transformed features.
+    '''
     def __init__(self,
                  in_channels: int,
                  out_channels: int,
@@ -85,10 +126,6 @@ class GLASSConv(torch.nn.Module):
                  aggr="mean",
                  z_ratio=0.8,
                  dropout=0.2):
-        '''
-        aggr: the aggregation method.
-        z_ratio: the ratio to mix the transformed features.
-        '''
         super().__init__()
         self.trans_fns = nn.ModuleList([
             nn.Linear(in_channels, out_channels),
@@ -113,37 +150,10 @@ class GLASSConv(torch.nn.Module):
             _.reset_parameters()
         self.gn.reset_parameters()
 
-    def buildAdj(self, edge_index, edge_weight, n_node: int):
-        '''
-        Calculating the normalized adjacency matrix.
-        '''
-        adj = torch.sparse_coo_tensor(edge_index,
-                                      edge_weight,
-                                      size=(n_node, n_node))
-        deg = torch.sparse.sum(adj, dim=(1, )).to_dense().flatten()
-        deg[deg < 0.5] += 1.0
-        if self.aggr == "mean":
-            deg = 1.0 / deg
-            return torch.sparse_coo_tensor(edge_index,
-                                           deg[edge_index[0]] * edge_weight,
-                                           size=(n_node, n_node))
-        elif self.aggr == "sum":
-            return torch.sparse_coo_tensor(edge_index,
-                                           edge_weight,
-                                           size=(n_node, n_node))
-        elif self.aggr == "gcn":
-            deg = torch.pow(deg, -0.5)
-            return torch.sparse_coo_tensor(edge_index,
-                                           deg[edge_index[0]] * edge_weight *
-                                           deg[edge_index[1]],
-                                           size=(n_node, n_node))
-        else:
-            raise NotImplementedError
-
     def forward(self, x_, edge_index, edge_weight, mask):
         if self.adj.shape[0] == 0:
             n_node = x_.shape[0]
-            self.adj = self.buildAdj(edge_index, edge_weight, n_node)
+            self.adj = buildAdj(edge_index, edge_weight, n_node, self.aggr)
         # transform node features with different parameters individually.
         x1 = self.activation(self.trans_fns[1](x_))
         x0 = self.activation(self.trans_fns[0](x_))
@@ -166,7 +176,12 @@ class GLASSConv(torch.nn.Module):
 
 class EmbZGConv(nn.Module):
     '''
-    Message passing block containing some message passing layers.
+    combination of some GLASSConv layers, normalization layers, dropout layers, and activation function.
+    Args:
+        max_deg: the max integer in input node features.
+        conv: the message passing layer we use.
+        gn: whether to use GraphNorm.
+        jk: whether to use Jumping Knowledge Network.
     '''
     def __init__(self,
                  hidden_channels,
@@ -179,12 +194,6 @@ class EmbZGConv(nn.Module):
                  gn=True,
                  jk=False,
                  **kwargs):
-        '''
-        max_deg: the max integer in input node features.
-        conv: the message passing layer we use.
-        gn: whether to use GraphNorm.
-        jk: whether to use Jumping Knowledge Network.
-        '''
         super().__init__()
         self.input_emb = nn.Embedding(max_deg + 1,
                                       hidden_channels,
@@ -263,14 +272,21 @@ class EmbZGConv(nn.Module):
             return x
 
 
-# Modules used for pooling node embeddings to produce subgraph embeddings.
 class PoolModule(nn.Module):
+    '''
+    Modules used for pooling node embeddings to produce subgraph embeddings.
+    Args: 
+        trans_fn: module to transfer node embeddings.
+        pool_fn: module to pool node embeddings like global_add_pool.
+    '''
     def __init__(self, pool_fn, trans_fn=None):
-        super(PoolModule, self).__init__()
+        super().__init__()
         self.pool_fn = pool_fn
         self.trans_fn = trans_fn
 
     def forward(self, x, batch):
+        # The j-th element in batch vector is i if node j is in the i-th subgraph.
+        # for example [0,1,0,0,1,1,2,2] means nodes 0,2,3 in subgraph 0, nodes 1,4,5 in subgraph 1, and nodes 6,7 in subgraph 2.
         if self.trans_fn is not None:
             x = self.trans_fn(x)
         return self.pool_fn(x, batch)
@@ -304,8 +320,14 @@ class SizePool(AddPool):
 
 
 class GLASS(nn.Module):
-    # GLASS model: combine message passing layers and mlps and pooling layers.
-    def __init__(self, conv, preds: nn.ModuleList, pools: nn.ModuleList):
+    '''
+    GLASS model: combine message passing layers and mlps and pooling layers.
+    Args:
+        preds and pools are ModuleList containing the same number of MLPs and Pooling layers.
+        preds[id] and pools[id] is used to predict the id-th target. Can be used for SSL.
+    '''
+    def __init__(self, conv: EmbZGConv, preds: nn.ModuleList,
+                 pools: nn.ModuleList):
         super().__init__()
         self.conv = conv
         self.preds = preds
@@ -334,7 +356,14 @@ class GLASS(nn.Module):
 
 
 # models used for producing node embeddings.
+
+
 class MyGCNConv(torch.nn.Module):
+    '''
+    A kind of message passing layer we use for pretrained GNNs.
+    Args:
+        aggr: the aggregation method.
+    '''
     def __init__(self,
                  in_channels: int,
                  out_channels: int,
@@ -353,34 +382,10 @@ class MyGCNConv(torch.nn.Module):
         self.comb_fn.reset_parameters()
         self.gn.reset_parameters()
 
-    def buildAdj(self, edge_index, edge_weight, n_node: int):
-        adj = torch.sparse_coo_tensor(edge_index,
-                                      edge_weight,
-                                      size=(n_node, n_node))
-        deg = torch.sparse.sum(adj, dim=(1, )).to_dense().flatten()
-        deg[deg < 0.5] += 1.0
-        if self.aggr == "mean":
-            deg = 1.0 / deg
-            return torch.sparse_coo_tensor(edge_index,
-                                           deg[edge_index[0]] * edge_weight,
-                                           size=(n_node, n_node))
-        elif self.aggr == "sum":
-            return torch.sparse_coo_tensor(edge_index,
-                                           edge_weight,
-                                           size=(n_node, n_node))
-        elif self.aggr == "gcn":
-            deg = torch.pow(deg, -0.5)
-            return torch.sparse_coo_tensor(edge_index,
-                                           deg[edge_index[0]] * edge_weight *
-                                           deg[edge_index[1]],
-                                           size=(n_node, n_node))
-        else:
-            raise NotImplementedError
-
     def forward(self, x_, edge_index, edge_weight):
         if self.adj.shape[0] == 0:
             n_node = x_.shape[0]
-            self.adj = self.buildAdj(edge_index, edge_weight, n_node)
+            self.adj = buildAdj(edge_index, edge_weight, n_node, self.aggr)
         x = self.trans_fn(x_)
         x = self.activation(x)
         x = self.adj @ x
@@ -391,6 +396,14 @@ class MyGCNConv(torch.nn.Module):
 
 
 class EmbGConv(torch.nn.Module):
+    '''
+    combination of some message passing layers, normalization layers, dropout layers, and activation function.
+    Args:
+        max_deg: the max integer in input node features.
+        conv: the message passing layer we use.
+        gn: whether to use GraphNorm.
+        jk: whether to use Jumping Knowledge Network.
+    '''
     def __init__(self,
                  input_channels: int,
                  hidden_channels: int,
@@ -403,7 +416,7 @@ class EmbGConv(torch.nn.Module):
                  gn=True,
                  jk=False,
                  **kwargs):
-        super(EmbGConv, self).__init__()
+        super().__init__()
         self.input_emb = nn.Embedding(max_deg + 1, hidden_channels)
         self.convs = nn.ModuleList()
         self.jk = jk
@@ -430,7 +443,7 @@ class EmbGConv(torch.nn.Module):
         self.dropout = dropout
         if gn:
             self.gns = nn.ModuleList()
-            for layer in range(num_layers - 1):
+            for _ in range(num_layers - 1):
                 self.gns.append(GraphNorm(hidden_channels))
         else:
             self.gns = None
@@ -463,8 +476,14 @@ class EmbGConv(torch.nn.Module):
 
 
 class EdgeGNN(nn.Module):
+    '''
+    EdgeGNN model: combine message passing layers and mlps and pooling layers to do link prediction task.
+    Args:
+        preds and pools are ModuleList containing the same number of MLPs and Pooling layers.
+        preds[id] and pools[id] is used to predict the id-th target. Can be used for SSL.
+    '''
     def __init__(self, conv, preds: nn.ModuleList, pools: nn.ModuleList):
-        super(EdgeGNN, self).__init__()
+        super().__init__()
         self.conv = conv
         self.preds = preds
         self.pools = pools
@@ -488,9 +507,3 @@ class EdgeGNN(nn.Module):
         emb = self.NodeEmb(x, edge_index, edge_weight, z)
         emb = self.Pool(emb, subG_node, self.pools[id])
         return self.preds[id](emb)
-
-    def get_params(self, z: int):
-        if z == -1:
-            return [_ for _ in self.preds.parameters()
-                    ] + [_ for _ in self.pools.parameters()]
-        return self.conv.get_params(z)

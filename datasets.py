@@ -11,6 +11,14 @@ import os
 class BaseGraph(Data):
     def __init__(self, x, edge_index, edge_weight, subG_node, subG_label,
                  mask):
+        '''
+        A general format for datasets.
+        Args:
+            x: node feature. For our used datasets, x is empty vector.
+            subG_node: a matrix like [[0,2,3],[1,4,5],[6,7,-1]], whose i-th row contains the nodes in the i-th subgraph. -1 is for padding.
+            subG_label: the target of subgraphs.
+            mask: of shape (number of subgraphs), type torch.long. mask[i]=0,1,2 if i-th subgraph is in the training set, validation set and test set respectively. 
+        '''
         super(BaseGraph, self).__init__(x=x,
                                         edge_index=edge_index,
                                         edge_attr=edge_weight,
@@ -79,9 +87,7 @@ class BaseGraph(Data):
 
 def load_dataset(name: str):
     # To use your own dataset, add a branch returning a BaseGraph Object here.
-    if name in [
-            "coreness", "cut_ratio", "density", "component"
-    ]:
+    if name in ["coreness", "cut_ratio", "density", "component"]:
         obj = np.load(f"./dataset_/{name}/tmp.npy", allow_pickle=True).item()
         # copied from https://github.com/mims-harvard/SubGNN/blob/main/SubGNN/subgraph_utils.py
         edge = np.array([[i[0] for i in obj['G'].edges],
@@ -105,6 +111,7 @@ def load_dataset(name: str):
                          torch.ones(edge.shape[1]), subG_pad, subGLabel, mask)
     elif name in ["ppi_bp", "hpo_metab", "hpo_neuro", "em_user"]:
         multilabel = False
+
         # copied from https://github.com/mims-harvard/SubGNN/blob/main/SubGNN/subgraph_utils.py
         def read_subgraphs(sub_f, split=True):
             label_idx = 0
