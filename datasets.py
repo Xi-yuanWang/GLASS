@@ -27,6 +27,21 @@ class BaseGraph(Data):
         self.mask = mask
         self.to_undirected()
 
+    def addDegreeFeature(self):
+        # For GNN-seg only, use one-hot node degree as node features.
+        adj = torch.sparse_coo_tensor(self.edge_index, self.edge_attr,
+                                      (self.x.shape[0], self.x.shape[0]))
+        degree = torch.sparse.sum(adj, dim=1).to_dense().to(torch.int64)
+        self.x = torch.cat((self.x, one_hot(degree).to(torch.float).reshape(
+            self.x.shape[0], 1, -1)),
+            dim=-1)
+    
+    def addOneFeature(self):
+        # For GNN-seg only, use one as node features.
+        self.x = torch.cat(
+            (self.x, torch.ones(self.x.shape[0], self.x.shape[1], 1)),
+            dim=-1)
+
     def setDegreeFeature(self, mod=1):
         # use node degree as node features.
         adj = torch.sparse_coo_tensor(self.edge_index, self.edge_attr,

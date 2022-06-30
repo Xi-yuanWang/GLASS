@@ -41,8 +41,6 @@ CODE
 ```
 #### Reproduce GLASS
 
-
-
 To reproduce our results on synthetic datasets:
 ```
 python GLASSTest.py --use_one --use_seed --use_maxzeroone --repeat 10 --device $gpu_id --dataset $dataset
@@ -62,6 +60,10 @@ python GLASSTest.py --use_nodeid --use_seed --use_maxzeroone --repeat 10 --devic
 ```
 where $dataset can be selected from em_user, ppi_bp, hpo_metab, and hpo_neuro.
 
+To reproduce GNN-seg
+```
+python GNNSeg.py --test  --repeat 10 --device $gpu_id --dataset $dataset
+```
 #### Use Your Own Dataset
 
 Please add a branch in the `load_dataset` function in datasets.py to load your dataset and create a configuration file in ./config to describe the hyperparameters for the GLASS model.
