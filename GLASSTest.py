@@ -199,6 +199,7 @@ def test(pool="size",
     for repeat in range(args.repeat):
         set_seed((1 << repeat) - 1)
         print(f"repeat {repeat}")
+        split()
         gnn = buildModel(hidden_dim, conv_layer, dropout, jk, pool, z_ratio,
                          aggr)
         trn_loader = loader_fn(trn_dataset, batch_size)
