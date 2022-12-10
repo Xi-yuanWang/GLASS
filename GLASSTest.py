@@ -79,8 +79,13 @@ def split():
     load and split dataset.
     '''
     # initialize and split dataset
-    global trn_dataset, val_dataset, tst_dataset
+    global trn_dataset, val_dataset, tst_dataset, baseG
     global max_deg, output_channels, loader_fn, tloader_fn
+    baseG = datasets.load_dataset(args.dataset)
+    if baseG.y.unique().shape[0] == 2:
+        baseG.y = baseG.y.to(torch.float)
+    else:
+        baseG.y = baseG.y.to(torch.int64)
     # initialize node features
     if args.use_deg:
         baseG.setDegreeFeature()
