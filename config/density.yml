@@ -2,8 +2,8 @@ aggr: sum
 batch_size: 2
 conv_layer: 1
 dropout: 0.0
-hidden_dim: 13
+hidden_dim: 8
 lr: 0.001
 pool: size
-resi: 0.2
-z_ratio: 0.95
+resi: 0.9
+z_ratio: 1.0
